@@ -6,6 +6,16 @@
 export CARGO_TARGET_DIR=.../dev/other/thunder/target
 ```
 
+### Kill process
+
+```bash
+ps -ef | grep thunder
+```
+
+```bash
+kill psid
+```
+
 [RFC-791](https://datatracker.ietf.org/doc/html/rfc791)
 [RFC-793](https://datatracker.ietf.org/doc/html/rfc793)
 

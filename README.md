@@ -1,5 +1,12 @@
 # Thunder
 
+## Set up
+
+```bash
+export CARGO_TARGET_DIR=.../dev/other/thunder/target
+```
+
+[RFC-791](https://datatracker.ietf.org/doc/html/rfc791)
 [RFC-793](https://datatracker.ietf.org/doc/html/rfc793)
 
 using a user-space networking interface

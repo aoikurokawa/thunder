@@ -16,14 +16,13 @@ ps -ef | grep thunder
 kill psid
 ```
 
-[RFC-791](https://datatracker.ietf.org/doc/html/rfc791)
-[RFC-793](https://datatracker.ietf.org/doc/html/rfc793)
 
 using a user-space networking interface
 - https://www.kernel.org/doc/Documentation/networking/tuntap.txt
 
 ## Crates
-- https://docs.rs/tun-tap/latest/tun_tap/
+- [tun_tap](https://docs.rs/tun-tap/latest/tun_tap/)
+- [etherparse](https://docs.rs/etherparse/latest/etherparse/)
 
 ## VPN
 - [Write a Toy VPN in Rust](https://write.yiransheng.com/vpn)
@@ -32,6 +31,9 @@ using a user-space networking interface
 - - https://github.com/unpbook/unpv13e/tree/master
 
 ## Resources
+- [RFC-791](https://datatracker.ietf.org/doc/html/rfc791)
+- [RFC-793](https://datatracker.ietf.org/doc/html/rfc793)
+- [RFC-1180](https://datatracker.ietf.org/doc/html/rfc1180)
 
 ### Youtube
 - https://www.youtube.com/watch?v=bzja9fQWzdA

@@ -28,11 +28,11 @@ pub struct Connection {
 /// ```
 struct SendSequenceSpace {
     /// send unacknowledged
-    una: usize,
+    una: u32,
     /// send next
-    nxt: usize,
+    nxt: u32,
     /// send window
-    wnd: usize,
+    wnd: u16,
     /// send urgent pointer
     up: bool,
     /// segment sequence number used for last window update
@@ -40,7 +40,7 @@ struct SendSequenceSpace {
     /// segment acknowledgment number used for last window update
     wl2: usize,
     /// initial send sequence number
-    iss: usize,
+    iss: u32,
 }
 
 /// State of Receive Sequence Space (RFC 793 S3.2 F5)
@@ -57,13 +57,13 @@ struct SendSequenceSpace {
 /// ```
 struct RecvSequenceSpace {
     /// receive next
-    nxt: usize,
+    nxt: u32,
     /// receive window
-    wnd: usize,
+    wnd: u16,
     /// receive urgent pointer
     up: bool,
     /// initial receive sequence number
-    irs: usize,
+    irs: u32,
 }
 
 impl Default for Connection {
@@ -94,9 +94,26 @@ impl Connection {
                     return Ok(0);
                 }
 
+                // keep track of sender info
+                self.recv.nxt = tcph.sequence_number() + 1;
+                self.recv.wnd = tcph.window_size();
+                self.recv.irs = tcph.sequence_number();
+
+                // decide on stuff we're sending them
+                self.send.iss = 0;
+                self.send.una = 0;
+                self.send.nxt = self.send.una + 1;
+                self.send.wnd = 10;
+                // self.send.wl1 =
+
                 // need to establish a connection
-                let mut syn_ack =
-                    etherparse::TcpHeader::new(tcph.destination_port(), tcph.source_port(), 0, 0);
+                let mut syn_ack = etherparse::TcpHeader::new(
+                    tcph.destination_port(),
+                    tcph.source_port(),
+                    self.send.iss as u32,
+                    self.send.wnd as u16,
+                );
+                syn_ack.acknowledgment_number = self.recv.nxt;
                 syn_ack.syn = true;
                 syn_ack.ack = true;
                 let ip = etherparse::Ipv4Header::new(

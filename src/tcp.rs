@@ -3,7 +3,7 @@ use std::io;
 enum State {
     Closed,
     Listen,
-    // SynRcvd,
+    SynRcvd,
     // Estab,
 }
 
@@ -66,76 +66,73 @@ struct RecvSequenceSpace {
     irs: u32,
 }
 
-impl Default for Connection {
-    fn default() -> Self {
-        Self {
-            state: State::Listen,
-        }
-    }
-}
-
 impl Connection {
-    pub fn on_packet<'a>(
-        &mut self,
+    pub fn accept<'a>(
         nic: &mut tun_tap::Iface,
         iph: etherparse::Ipv4HeaderSlice<'a>,
         tcph: etherparse::TcpHeaderSlice<'a>,
         data: &'a [u8],
-    ) -> io::Result<usize> {
+    ) -> io::Result<Option<Self>> {
         let mut buf = [0u8; 1500];
 
-        match self.state {
-            State::Closed => {
-                return Ok(0);
-            }
-            State::Listen => {
-                if !tcph.syn() {
-                    // only expected SYN packet
-                    return Ok(0);
-                }
-
-                // keep track of sender info
-                self.recv.nxt = tcph.sequence_number() + 1;
-                self.recv.wnd = tcph.window_size();
-                self.recv.irs = tcph.sequence_number();
-
-                // decide on stuff we're sending them
-                self.send.iss = 0;
-                self.send.una = 0;
-                self.send.nxt = self.send.una + 1;
-                self.send.wnd = 10;
-                // self.send.wl1 =
-
-                // need to establish a connection
-                let mut syn_ack = etherparse::TcpHeader::new(
-                    tcph.destination_port(),
-                    tcph.source_port(),
-                    self.send.iss as u32,
-                    self.send.wnd as u16,
-                );
-                syn_ack.acknowledgment_number = self.recv.nxt;
-                syn_ack.syn = true;
-                syn_ack.ack = true;
-                let ip = etherparse::Ipv4Header::new(
-                    syn_ack.header_len_u16(),
-                    64,
-                    etherparse::IpNumber::TCP,
-                    iph.destination_addr().octets(),
-                    iph.source_addr().octets(),
-                )
-                .expect("construct Ipv4 header");
-
-                // Write out the headers
-                let unwritten = {
-                    let mut unwritten = &mut buf[..];
-                    ip.write(&mut unwritten)?;
-                    syn_ack.write(&mut unwritten)?;
-                    unwritten.len()
-                };
-
-                Ok(nic.send(&buf[..unwritten])?)
-            }
+        if !tcph.syn() {
+            // only expected SYN packet
+            return Ok(None);
         }
+
+        let iss = 0;
+        let mut c = Connection {
+            state: State::SynRcvd,
+            // decide on stuff we're sending them
+            send: SendSequenceSpace {
+                iss,
+                una: iss,
+                nxt: iss + 1,
+                wnd: 10,
+                up: false,
+
+                wl1: 0,
+                wl2: 0,
+            },
+            // keep track of sender info
+            recv: RecvSequenceSpace {
+                nxt: tcph.sequence_number() + 1,
+                wnd: tcph.window_size(),
+                up: false,
+                irs: tcph.sequence_number(),
+            },
+        };
+
+        // need to establish a connection
+        let mut syn_ack = etherparse::TcpHeader::new(
+            tcph.destination_port(),
+            tcph.source_port(),
+            c.send.iss as u32,
+            c.send.wnd as u16,
+        );
+        syn_ack.acknowledgment_number = c.recv.nxt;
+        syn_ack.syn = true;
+        syn_ack.ack = true;
+        let ip = etherparse::Ipv4Header::new(
+            syn_ack.header_len_u16(),
+            64,
+            etherparse::IpNumber::TCP,
+            iph.destination_addr().octets(),
+            iph.source_addr().octets(),
+        )
+        .expect("construct Ipv4 header");
+
+        // Write out the headers
+        let unwritten = {
+            let mut unwritten = &mut buf[..];
+            ip.write(&mut unwritten)?;
+            syn_ack.write(&mut unwritten)?;
+            unwritten.len()
+        };
+
+        nic.send(&buf[..unwritten])?;
+
+        Ok(Some(c))
         // eprintln!(
         //     "{}:{} -> {}:{} {}b of tcp",
         //     iph.source_addr(),

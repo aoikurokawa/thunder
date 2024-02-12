@@ -94,7 +94,7 @@ impl Connection {
         }
 
         let iss = 0;
-        let wnd = 10;
+        let wnd = 1024;
         let mut c = Connection {
             state: State::SynRcvd,
             // decide on stuff we're sending them
@@ -146,7 +146,7 @@ impl Connection {
             self.tcp.header_len() + self.ip.header_len() + payload.len(),
         );
         self.ip
-            .set_payload_len(size)
+            .set_payload_len(size - self.ip.header_len())
             .expect("failed to set payload length");
 
         let mut unwritten = &mut buf[..];
@@ -186,13 +186,6 @@ impl Connection {
         data: &'a [u8],
     ) -> io::Result<()> {
         // first, check that sequence number are valid (RFC 793 S3.3)
-        //
-        // valid segment check. okay if it acks at least one byte, which means that at least one of
-        // the following is true:
-        //
-        // RCV.NXT =< SEG.SEQ < RCV.NXT+RCV.WND
-        // RCV.NXT =< SEG.SEQ+SEG.LEN-1 < RCV.NXT+RCV.WND
-        //
         let seqn = tcph.sequence_number();
         let mut slen = data.len() as u32;
         if tcph.fin() {
@@ -202,17 +195,21 @@ impl Connection {
             slen += 1;
         }
         let wend = self.recv.nxt.wrapping_add(self.recv.wnd as u32);
-        if slen == 0 {
+        let okay = if slen == 0 {
             if self.recv.wnd == 0 {
                 if seqn == self.recv.nxt {
-                    return Ok(());
+                    false
+                } else {
+                    true
                 }
             } else if !is_between_wrapped(self.recv.nxt.wrapping_sub(1), seqn, wend) {
-                return Ok(());
+                false
+            } else {
+                true
             }
         } else {
             if self.recv.wnd == 0 {
-                return Ok(());
+                false
             } else if !is_between_wrapped(self.recv.nxt.wrapping_sub(1), seqn, wend)
                 && !is_between_wrapped(
                     self.recv.nxt.wrapping_sub(1),
@@ -220,8 +217,15 @@ impl Connection {
                     wend,
                 )
             {
-                return Ok(());
+                false
+            } else {
+                true
             }
+        };
+
+        if !okay {
+            self.write(nic, &[])?;
+            return Ok(());
         }
         self.recv.nxt = seqn.wrapping_add(slen);
 
@@ -233,14 +237,14 @@ impl Connection {
         // SND.UNA < SEG.ACK =< SND.NXT
         // but remember wrapping!
         //
-        if !is_between_wrapped(self.send.una, ackn, self.send.nxt.wrapping_add(1)) {
-            if !self.state.is_synchronized() {
-                // according to Reset Generation, we should send RST
-                self.send_rst(nic)?;
-            }
-            return Ok(());
-        }
-        self.send.una = ackn;
+        // if !is_between_wrapped(self.send.una, ackn, self.send.nxt.wrapping_add(1)) {
+        //     if !self.state.is_synchronized() {
+        //         // according to Reset Generation, we should send RST
+        //         self.send_rst(nic)?;
+        //     }
+        //     return Ok(());
+        // }
+        // self.send.una = ackn;
 
         // TODO: make sure this gets acked
         let ackn = tcph.acknowledgment_number();
@@ -286,7 +290,7 @@ impl Connection {
                     self.write(nic, &[])?;
                     self.state = State::TimeWait;
                 }
-                _ => {}
+                _ => unimplemented!(),
             }
         }
 

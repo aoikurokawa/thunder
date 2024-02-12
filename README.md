@@ -36,7 +36,7 @@ using a user-space networking interface
 - [RFC-1180](https://datatracker.ietf.org/doc/html/rfc1180)
 
 ### Youtube
-- https://www.youtube.com/watch?v=bzja9fQWzdA
+- https://youtu.be/bzja9fQWzdA?t=13862
 
 ### Book 
 - https://beej.us/guide/bgnet/html/split/more-references.html#books 

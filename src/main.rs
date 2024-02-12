@@ -1,6 +1,15 @@
-use std::io;
+use std::{collections::HashMap, io, net::Ipv4Addr};
+
+mod tcp;
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+struct Quad {
+    src: (Ipv4Addr, u16),
+    dst: (Ipv4Addr, u16),
+}
 
 fn main() -> io::Result<()> {
+    let mut connections: HashMap<Quad, tcp::State> = Default::default();
     let nic = tun_tap::Iface::new("tun0", tun_tap::Mode::Tun)?;
     let mut buf = [0u8; 1504];
 
@@ -15,17 +24,29 @@ fn main() -> io::Result<()> {
         }
 
         match etherparse::Ipv4HeaderSlice::from_slice(&buf[4..nbytes]) {
-            Ok(p) => {
-                let src = p.source_addr();
-                let dst = p.destination_addr();
-                let proto = p.protocol();
-                eprintln!(
-                    "{} -> {} {}b of protocol {}",
-                    src,
-                    dst,
-                    p.payload_len().expect("get payload length"),
-                    proto.0,
-                );
+            Ok(iph) => {
+                let src = iph.source_addr();
+                let dst = iph.destination_addr();
+                if iph.protocol().0 != 0x06 {
+                    // not tcp
+                    continue;
+                }
+
+                match etherparse::TcpHeaderSlice::from_slice(&buf[4 + iph.slice().len()..nbytes]) {
+                    Ok(tcph) => {
+                        let datai = 4 + iph.slice().len() + tcph.slice().len();
+                        connections
+                            .entry(Quad {
+                                src: (src, tcph.source_port()),
+                                dst: (dst, tcph.destination_port()),
+                            })
+                            .or_default()
+                            .on_packet(iph, tcph, &buf[datai..nbytes]);
+                    }
+                    Err(e) => {
+                        eprintln!("ignoring weird tcp packet: {e}");
+                    }
+                }
             }
             Err(e) => {
                 eprintln!("ignoring weird packet: {e}");

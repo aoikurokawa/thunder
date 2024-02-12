@@ -9,8 +9,8 @@ struct Quad {
 }
 
 fn main() -> io::Result<()> {
-    let mut connections: HashMap<Quad, tcp::State> = Default::default();
-    let nic = tun_tap::Iface::new("tun0", tun_tap::Mode::Tun)?;
+    let mut connections: HashMap<Quad, tcp::Connection> = Default::default();
+    let mut nic = tun_tap::Iface::new("tun0", tun_tap::Mode::Tun)?;
     let mut buf = [0u8; 1504];
 
     loop {
@@ -41,7 +41,7 @@ fn main() -> io::Result<()> {
                                 dst: (dst, tcph.destination_port()),
                             })
                             .or_default()
-                            .on_packet(iph, tcph, &buf[datai..nbytes]);
+                            .on_packet(&mut nic, iph, tcph, &buf[datai..nbytes])?;
                     }
                     Err(e) => {
                         eprintln!("ignoring weird tcp packet: {e}");

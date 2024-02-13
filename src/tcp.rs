@@ -149,6 +149,11 @@ impl Connection {
             .set_payload_len(size - self.ip.header_len())
             .expect("failed to set payload length");
 
+        self.tcp.checksum = self
+            .tcp
+            .calc_checksum_ipv4(&self.ip, &[])
+            .expect("failed to compute checksum");
+
         let mut unwritten = &mut buf[..];
         self.ip.write(&mut unwritten)?;
         self.tcp.write(&mut unwritten)?;
@@ -249,7 +254,7 @@ impl Connection {
         // TODO: make sure this gets acked
         let ackn = tcph.acknowledgment_number();
         if let State::SynRcvd = self.state {
-            if !is_between_wrapped(
+            if is_between_wrapped(
                 self.send.una.wrapping_sub(1),
                 ackn,
                 self.send.nxt.wrapping_add(1),
@@ -260,7 +265,7 @@ impl Connection {
             }
         }
 
-        if let State::Estab = self.state {
+        if let State::Estab | State::FinWait1 | State::FinWait2 = self.state {
             if !is_between_wrapped(self.send.una, ackn, self.send.nxt.wrapping_add(1)) {
                 return Ok(());
             }
@@ -269,6 +274,7 @@ impl Connection {
 
             // TODO:
             assert!(data.is_empty());
+
             // now let's terminate the connection
             // TODO: needs to be stored in the retransmission queue!
             self.tcp.fin = true;
@@ -291,13 +297,6 @@ impl Connection {
                     self.state = State::TimeWait;
                 }
                 _ => unimplemented!(),
-            }
-        }
-
-        if let State::FinWait2 = self.state {
-            if self.send.una == self.send.iss + 2 {
-                // our FIN has been ACKed!
-                self.state = State::FinWait2;
             }
         }
 

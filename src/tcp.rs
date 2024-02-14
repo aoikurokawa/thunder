@@ -110,10 +110,10 @@ impl Connection {
             },
             // keep track of sender info
             recv: RecvSequenceSpace {
+                irs: tcph.sequence_number(),
                 nxt: tcph.sequence_number() + 1,
                 wnd: tcph.window_size(),
                 up: false,
-                irs: tcph.sequence_number(),
             },
             ip: etherparse::Ipv4Header::new(
                 0,
@@ -237,21 +237,7 @@ impl Connection {
         if !tcph.ack() {
             return Ok(());
         }
-        //
-        // acceptable ack check
-        // SND.UNA < SEG.ACK =< SND.NXT
-        // but remember wrapping!
-        //
-        // if !is_between_wrapped(self.send.una, ackn, self.send.nxt.wrapping_add(1)) {
-        //     if !self.state.is_synchronized() {
-        //         // according to Reset Generation, we should send RST
-        //         self.send_rst(nic)?;
-        //     }
-        //     return Ok(());
-        // }
-        // self.send.una = ackn;
 
-        // TODO: make sure this gets acked
         let ackn = tcph.acknowledgment_number();
         if let State::SynRcvd = self.state {
             if is_between_wrapped(
@@ -271,15 +257,16 @@ impl Connection {
             }
 
             self.send.una = ackn;
-
             // TODO:
             assert!(data.is_empty());
 
-            // now let's terminate the connection
-            // TODO: needs to be stored in the retransmission queue!
-            self.tcp.fin = true;
-            self.write(nic, &[])?;
-            self.state = State::FinWait1;
+            if let State::Estab = self.state {
+                // now let's terminate the connection
+                // TODO: needs to be stored in the retransmission queue!
+                self.tcp.fin = true;
+                self.write(nic, &[])?;
+                self.state = State::FinWait1;
+            }
         }
 
         if let State::FinWait1 = self.state {

@@ -35,6 +35,7 @@ fn main() -> io::Result<()> {
                 let src = iph.source_addr();
                 let dst = iph.destination_addr();
                 if iph.protocol().0 != 0x06 {
+                    eprint!("BAD PROTOCOL");
                     // not tcp
                     continue;
                 }

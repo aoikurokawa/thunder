@@ -36,11 +36,14 @@ using a user-space networking interface
 - [RFC-1180](https://datatracker.ietf.org/doc/html/rfc1180)
 
 ### Youtube
+Implementing TCP in Rust (part1)
 - https://youtu.be/bzja9fQWzdA?t=17549
+
+Implementing TCP in Rust (part2)
+- https://youtu.be/OCpt1I0MWXE?t=1287
 
 ### Book 
 - https://beej.us/guide/bgnet/html/split/more-references.html#books 
 - http://unpbook.com/
 - https://ia801502.us.archive.org/26/items/unix-network-programming-3/Unix%20Network%20Programming%20-%20W.%20Richard%20Stevens%20-%203rd%20Edition%20Volume%201.pdf
-
 

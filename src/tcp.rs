@@ -115,6 +115,7 @@ impl Connection {
                 wnd: tcph.window_size(),
                 up: false,
             },
+            tcp: etherparse::TcpHeader::new(tcph.destination_port(), tcph.source_port(), iss, wnd),
             ip: etherparse::Ipv4Header::new(
                 0,
                 64,
@@ -123,7 +124,6 @@ impl Connection {
                 iph.source_addr().octets(),
             )
             .expect("construct Ipv4 header"),
-            tcp: etherparse::TcpHeader::new(tcph.destination_port(), tcph.source_port(), iss, wnd),
         };
 
         // need to establish a connection
@@ -137,7 +137,6 @@ impl Connection {
 
     fn write(&mut self, nic: &mut tun_tap::Iface, payload: &[u8]) -> io::Result<usize> {
         let mut buf = [0u8; 1500];
-
         self.tcp.sequence_number = self.send.nxt;
         self.tcp.acknowledgment_number = self.recv.nxt;
 
@@ -300,7 +299,7 @@ fn is_between_wrapped(start: u32, x: u32, end: u32) -> bool {
             }
         }
         Ordering::Greater => {
-            if end < start && end < x {
+            if end < start && end > x {
             } else {
                 return false;
             }

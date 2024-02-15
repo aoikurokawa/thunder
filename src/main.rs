@@ -63,8 +63,8 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
-            Err(_e) => {
-                // eprintln!("ignoring weird packet: {e}");
+            Err(e) => {
+                eprintln!("ignoring weird packet: {e}");
             }
         }
     }

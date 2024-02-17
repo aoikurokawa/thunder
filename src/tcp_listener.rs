@@ -1,20 +1,28 @@
-use std::{io, sync::mpsc};
+use std::io;
 
 use crate::{
     tcp_stream::{self},
-    InterfaceHandle, InterfaceRequest,
+    InterfaceHandle,
 };
 
 pub struct TcpListener(pub u16, pub InterfaceHandle);
 
 impl TcpListener {
     pub fn accept(&mut self) -> io::Result<tcp_stream::TcpStream> {
-        let (read, rx) = mpsc::channel();
-        self.1
-            .send(InterfaceRequest::Accept { port: self.0, read })
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-        let quad = rx.recv().unwrap();
-        Ok(tcp_stream::TcpStream(quad, self.1.clone()))
+        let port = &self.0;
+        let cm = self.1.lock().unwrap();
+        if let Some(quad) = cm
+            .pending
+            .get(port)
+            .expect("port closed while listener still active")
+            .pop_front()
+        {
+            Ok(tcp_stream::TcpStream(quad, self.1.clone()))
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "no connection available to accept",
+            ))
+        }
     }
 }

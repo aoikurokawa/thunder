@@ -1,8 +1,8 @@
 use std::{
-    collections::HashMap,
-    io::{self, Read, Write},
+    collections::{hash_map::Entry, HashMap, VecDeque},
+    io,
     net::Ipv4Addr,
-    sync::mpsc,
+    sync::{mpsc, Arc, Mutex},
     thread,
 };
 
@@ -16,7 +16,13 @@ struct Quad {
     dst: (Ipv4Addr, u16),
 }
 
-type InterfaceHandle = mpsc::Sender<InterfaceRequest>;
+type InterfaceHandle = Arc<Mutex<ConnectionManager>>;
+
+#[derive(Default)]
+struct ConnectionManager {
+    connections: HashMap<Quad, tcp::Connection>,
+    pending: HashMap<u16, VecDeque<Quad>>,
+}
 
 enum InterfaceRequest {
     Write {
@@ -45,44 +51,44 @@ enum InterfaceRequest {
 }
 
 pub struct Interface {
-    tx: InterfaceHandle,
+    ih: InterfaceHandle,
     jh: thread::JoinHandle<()>,
 }
 
 impl Interface {
     pub fn new() -> io::Result<Self> {
-        let cm = ConnectionManager {
-            connections: Default::default(),
-            nic: tun_tap::Iface::without_packet_info("tun0", tun_tap::Mode::Tun)?,
-            buf: [0u8; 1504],
+        let nic = tun_tap::Iface::without_packet_info("tun0", tun_tap::Mode::Tun)?;
+
+        let cm: InterfaceHandle = Arc::default();
+
+        let jh = {
+            let cm = cm.clone();
+            thread::spawn(move || {
+                let nic = nic;
+                let cm = cm;
+                let buf = [0u8; 1504];
+
+                // do the stuff that main does
+            })
         };
 
-        let (tx, rx) = mpsc::channel();
-        let jh = thread::spawn(move || cm.run_on(rx));
-
-        Ok(Self { tx, jh })
+        Ok(Self { ih: cm, jh })
     }
 
     pub fn bind(&mut self, port: u16) -> io::Result<tcp_listener::TcpListener> {
-        let (ack, rx) = mpsc::channel();
-        self.tx
-            .send(InterfaceRequest::Bind { port, ack })
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-        rx.recv().unwrap();
-        Ok(tcp_listener::TcpListener(port, self.tx.clone()))
-    }
-}
-
-struct ConnectionManager {
-    connections: HashMap<Quad, tcp::Connection>,
-    nic: tun_tap::Iface,
-    buf: [u8; 1504],
-}
-
-impl ConnectionManager {
-    pub fn run_on(self, rx: mpsc::Receiver<InterfaceRequest>) {
-        // main event loop for packet processing
-        for req in rx {}
+        let mut cm = self.ih.lock().unwrap();
+        match cm.pending.entry(port) {
+            Entry::Occupied(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::AddrInUse,
+                    "port already bound",
+                ));
+            }
+            Entry::Vacant(v) => {
+                v.insert(VecDeque::new());
+            }
+        }
+        drop(cm);
+        Ok(tcp_listener::TcpListener(port, self.ih.clone()))
     }
 }

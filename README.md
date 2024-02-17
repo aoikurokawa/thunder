@@ -40,7 +40,7 @@ Implementing TCP in Rust (part1)
 - https://youtu.be/bzja9fQWzdA?t=17549
 
 Implementing TCP in Rust (part2)
-- https://youtu.be/OCpt1I0MWXE?t=1287
+- https://youtu.be/OCpt1I0MWXE?t=4561
 
 ### Book 
 - https://beej.us/guide/bgnet/html/split/more-references.html#books 

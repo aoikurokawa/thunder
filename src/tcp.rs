@@ -270,8 +270,29 @@ impl Connection {
                 self.send.una = ackn;
             }
 
+            // TODO: prune self.unacked
+            // TODO: if unacked empty and waiting flush, notify
+            // TODO: update window
+        }
+
+        if let State::FinWait1 = self.state {
+            if self.send.una == self.send.iss + 2 {
+                // our FIN has been ACKed!
+                self.state = State::FinWait2;
+            }
+        }
+
+        if let State::Estab | State::FinWait1 | State::FinWait2 = self.state {
             // TODO: accept data
-            self.incoming.extend(data);
+            self.incoming
+                .extend(&data[(self.recv.nxt - seqn) as usize..]);
+
+            self.recv.nxt =
+                seqn.wrapping_add(data.len() as u32)
+                    .wrapping_add(if tcph.fin() { 1 } else { 0 });
+
+            // Send an acknowledgement of the form: <SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>
+            self.write(nic, &[])?;
 
             /*
             if let State::Estab = self.state {
@@ -282,13 +303,6 @@ impl Connection {
                 self.state = State::FinWait1;
             }
             */
-        }
-
-        if let State::FinWait1 = self.state {
-            if self.send.una == self.send.iss + 2 {
-                // our FIN has been ACKed!
-                self.state = State::FinWait2;
-            }
         }
 
         if tcph.fin() {

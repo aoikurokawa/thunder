@@ -40,7 +40,7 @@ pub struct ConnectionManager {
     pending: HashMap<u16, VecDeque<Quad>>,
 }
 
-enum InterfaceRequest {
+pub enum InterfaceRequest {
     Write {
         quad: Quad,
         bytes: Vec<u8>,

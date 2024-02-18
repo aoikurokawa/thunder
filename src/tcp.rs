@@ -12,7 +12,7 @@ bitflags! {
     }
 }
 
-enum State {
+pub enum State {
     // Listen,
     SynRcvd,
     Estab,
@@ -54,7 +54,7 @@ pub struct Connection {
 /// 3 - sequence numbers allowed for new data transmission
 /// 4 - future sequence numbers which are not yet allowed
 /// ```
-struct SendSequenceSpace {
+pub struct SendSequenceSpace {
     /// send unacknowledged
     una: u32,
     /// send next
@@ -83,7 +83,7 @@ struct SendSequenceSpace {
 /// 2 - sequence numbers allowed for new reception
 /// 3 - future sequence numbers which are not yet allowed
 /// ```
-struct RecvSequenceSpace {
+pub struct RecvSequenceSpace {
     /// receive next
     nxt: u32,
     /// receive window

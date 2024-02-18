@@ -3,6 +3,15 @@ use std::{
     io::{self, Write},
 };
 
+use bitflags::bitflags;
+
+bitflags! {
+    pub struct Available: u8 {
+        const READ = 0b00000001;
+        const WRITE = 0b00000010;
+    }
+}
+
 enum State {
     // Listen,
     SynRcvd,
@@ -194,7 +203,7 @@ impl Connection {
         _iph: etherparse::Ipv4HeaderSlice<'a>,
         tcph: etherparse::TcpHeaderSlice<'a>,
         data: &'a [u8],
-    ) -> io::Result<()> {
+    ) -> io::Result<Available> {
         // first, check that sequence number are valid (RFC 793 S3.3)
         let seqn = tcph.sequence_number();
         let mut slen = data.len() as u32;
@@ -235,12 +244,12 @@ impl Connection {
 
         if !okay {
             self.write(nic, &[])?;
-            return Ok(());
+            return Ok(self.availability());
         }
         self.recv.nxt = seqn.wrapping_add(slen);
 
         if !tcph.ack() {
-            return Ok(());
+            return Ok(self.availability());
         }
 
         let ackn = tcph.acknowledgment_number();
@@ -257,12 +266,11 @@ impl Connection {
         }
 
         if let State::Estab | State::FinWait1 | State::FinWait2 = self.state {
-            if !is_between_wrapped(self.send.una, ackn, self.send.nxt.wrapping_add(1)) {
-                return Ok(());
+            if is_between_wrapped(self.send.una, ackn, self.send.nxt.wrapping_add(1)) {
+                self.send.una = ackn;
             }
 
-            self.send.una = ackn;
-            // TODO:
+            // TODO: accept data
             assert!(data.is_empty());
 
             if let State::Estab = self.state {
@@ -292,7 +300,24 @@ impl Connection {
             }
         }
 
-        Ok(())
+        Ok(self.availability())
+    }
+
+    pub(crate) fn is_rcv_closed(&self) -> bool {
+        if let State::TimeWait = self.state {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn availability(&self) -> Available {
+        let mut a = Available::empty();
+        if self.is_rcv_closed() || !self.incoming.is_empty() {
+            a |= Available::READ;
+        }
+
+        a
     }
 }
 

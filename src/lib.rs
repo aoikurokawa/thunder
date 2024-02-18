@@ -22,6 +22,7 @@ pub struct Quad {
 pub struct Foobar {
     manager: Mutex<ConnectionManager>,
     pending_var: Condvar,
+    rcv_var: Condvar,
 }
 
 type InterfaceHandle = Arc<Foobar>;
@@ -157,7 +158,18 @@ fn packet_loop(nic: &mut tun_tap::Iface, ih: InterfaceHandle) -> io::Result<()> 
                         };
                         match cm.connections.entry(quad) {
                             Entry::Occupied(mut c) => {
-                                c.get_mut().on_packet(nic, iph, tcph, &buf[datai..nbytes])?;
+                                let a =
+                                    c.get_mut().on_packet(nic, iph, tcph, &buf[datai..nbytes])?;
+
+                                // TODO: compare before/after
+                                drop(cmg);
+                                if a.contains(tcp::Available::READ) {
+                                    ih.rcv_var.notify_all();
+                                }
+
+                                if a.contains(tcp::Available::WRITE) {
+                                    // TODO: ih.snd_var.notify_all();
+                                }
                             }
                             Entry::Vacant(e) => {
                                 if let Some(pending) = cm.pending.get_mut(&tcph.destination_port())

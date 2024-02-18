@@ -271,8 +271,9 @@ impl Connection {
             }
 
             // TODO: accept data
-            assert!(data.is_empty());
+            self.incoming.extend(data);
 
+            /*
             if let State::Estab = self.state {
                 // now let's terminate the connection
                 // TODO: needs to be stored in the retransmission queue!
@@ -280,6 +281,7 @@ impl Connection {
                 self.write(nic, &[])?;
                 self.state = State::FinWait1;
             }
+            */
         }
 
         if let State::FinWait1 = self.state {

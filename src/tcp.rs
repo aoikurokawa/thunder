@@ -1,4 +1,7 @@
-use std::io::{self, Write};
+use std::{
+    collections::VecDeque,
+    io::{self, Write},
+};
 
 enum State {
     // Listen,
@@ -19,11 +22,14 @@ impl State {
 }
 
 pub struct Connection {
-    state: State,
-    send: SendSequenceSpace,
-    recv: RecvSequenceSpace,
-    ip: etherparse::Ipv4Header,
-    tcp: etherparse::TcpHeader,
+    pub state: State,
+    pub send: SendSequenceSpace,
+    pub recv: RecvSequenceSpace,
+    pub ip: etherparse::Ipv4Header,
+    pub tcp: etherparse::TcpHeader,
+
+    pub incoming: VecDeque<u8>,
+    pub unacked: VecDeque<u8>,
 }
 
 /// State of Send Sequence Space (RFC 793 S3.2 F4)
@@ -121,6 +127,9 @@ impl Connection {
                 iph.source_addr().octets(),
             )
             .expect("construct Ipv4 header"),
+
+            incoming: Default::default(),
+            unacked: Default::default(),
         };
 
         // need to establish a connection
@@ -169,7 +178,7 @@ impl Connection {
         Ok(payload_bytes)
     }
 
-    fn send_rst(&mut self, nic: &mut tun_tap::Iface) -> io::Result<()> {
+    pub fn send_rst(&mut self, nic: &mut tun_tap::Iface) -> io::Result<()> {
         self.tcp.rst = true;
         self.tcp.sequence_number = 0;
         self.tcp.acknowledgment_number = 0;
@@ -182,7 +191,7 @@ impl Connection {
     pub fn on_packet<'a>(
         &mut self,
         nic: &mut tun_tap::Iface,
-        iph: etherparse::Ipv4HeaderSlice<'a>,
+        _iph: etherparse::Ipv4HeaderSlice<'a>,
         tcph: etherparse::TcpHeaderSlice<'a>,
         data: &'a [u8],
     ) -> io::Result<()> {

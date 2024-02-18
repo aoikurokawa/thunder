@@ -1,53 +1,104 @@
 use std::{
     io::{self, Read, Write},
-    sync::mpsc,
+    net::Shutdown,
 };
 
-use crate::{InterfaceHandle, InterfaceRequest, Quad};
+use crate::{InterfaceHandle, Quad, SENDQUEUE_SIZE};
 
-pub struct TcpStream(pub Quad, pub InterfaceHandle);
+pub struct TcpStream {
+    pub quad: Quad,
+    pub h: InterfaceHandle,
+}
+
+impl Drop for TcpStream {
+    fn drop(&mut self) {
+        let _cm = self.h.manager.lock().unwrap();
+
+        // TODO: send FIN on cm.connections[quad]
+        // TODO: _eventually_ remove self.quad from cm.connections
+        // if let Some(_c) = cm.connections.remove(&self.quad) {
+        //     unimplemented!();
+        // }
+    }
+}
 
 impl Read for TcpStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let (read, rx) = mpsc::channel();
-        self.1
-            .send(InterfaceRequest::Read {
-                quad: self.0,
-                max_length: buf.len(),
-                read,
-            })
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let mut cm = self.h.manager.lock().unwrap();
+        let c = cm.connections.get_mut(&self.quad).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "stream was terminated unexpectedly",
+            )
+        })?;
 
-        let bytes = rx.recv().unwrap();
-        assert!(bytes.len() <= buf.len());
-        buf.copy_from_slice(&bytes[..]);
-        Ok(bytes.len())
+        if c.incoming.is_empty() {
+            return Err(io::Error::new(io::ErrorKind::WouldBlock, "no bytes read"));
+        }
+
+        let mut nread = 0;
+        let (head, tail) = c.incoming.as_slices();
+
+        let hread = std::cmp::min(buf.len(), head.len());
+        buf.copy_from_slice(&head[..hread]);
+        nread += hread;
+
+        let tread = std::cmp::min(buf.len() - nread, tail.len());
+        buf.copy_from_slice(&tail[..tread]);
+        nread += tread;
+
+        drop(c.incoming.drain(..nread));
+
+        Ok(nread)
     }
 }
 
 impl Write for TcpStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let (ack, rx) = mpsc::channel();
-        self.1
-            .send(InterfaceRequest::Write {
-                quad: self.0,
-                bytes: Vec::from(buf),
-                ack,
-            })
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let mut cm = self.h.manager.lock().unwrap();
+        let c = cm.connections.get_mut(&self.quad).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "stream was terminated unexpectedly",
+            )
+        })?;
 
-        let n = rx.recv().unwrap();
-        assert!(n <= buf.len());
-        Ok(n)
+        if c.unacked.len() > SENDQUEUE_SIZE {
+            // TODO: block
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "too many bytes buffered",
+            ));
+        }
+
+        let nwrite = std::cmp::min(buf.len(), SENDQUEUE_SIZE - c.unacked.len());
+        c.unacked.extend(&buf[..nwrite]);
+        Ok(nwrite)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        let (ack, rx) = mpsc::channel();
-        self.1
-            .send(InterfaceRequest::Flush { quad: self.0, ack })
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let mut cm = self.h.manager.lock().unwrap();
+        let c = cm.connections.get_mut(&self.quad).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "stream was terminated unexpectedly",
+            )
+        })?;
 
-        rx.recv().unwrap();
-        Ok(())
+        if c.unacked.is_empty() {
+            Ok(())
+        } else {
+            // TODO: block
+            Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "too many bytes buffered",
+            ))
+        }
+    }
+}
+
+impl TcpStream {
+    pub fn shutdown(&self, _how: Shutdown) -> io::Result<()> {
+        unimplemented!()
     }
 }

@@ -5,16 +5,22 @@ use std::{
 
 fn main() -> io::Result<()> {
     let mut i = thunder::Interface::new()?;
-    let mut l1 = i.bind(9000)?;
+    let mut l1 = i.bind(8000)?;
 
     let jh1 = thread::spawn(move || {
         while let Ok(mut stream) = l1.accept() {
-            eprintln!("got connection on 9000");
-
-            let mut buf = [0u8; 1024];
-            let n = stream.read(&mut buf).unwrap();
-            eprintln!("read data");
-            assert_eq!(n, 0);
+            eprintln!("got connection on 8000");
+            loop {
+                let mut buf = [0u8; 512];
+                let n = stream.read(&mut buf).unwrap();
+                eprintln!("read {}bytes of data", n);
+                if n == 0 {
+                    eprintln!("no more data");
+                    break;
+                } else {
+                    println!("{}", std::str::from_utf8(&buf[..n]).unwrap());
+                }
+            }
         }
     });
 

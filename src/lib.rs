@@ -190,8 +190,8 @@ fn packet_loop(nic: &mut tun_tap::Iface, ih: InterfaceHandle) -> io::Result<()> 
                     }
                 }
             }
-            Err(e) => {
-                eprintln!("ignoring weird packet: {e}");
+            Err(_e) => {
+                // eprintln!("ignoring weird packet: {e}");
             }
         }
     }

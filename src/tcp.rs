@@ -246,9 +246,13 @@ impl Connection {
             self.write(nic, &[])?;
             return Ok(self.availability());
         }
-        self.recv.nxt = seqn.wrapping_add(slen);
 
         if !tcph.ack() {
+            if tcph.syn() {
+                // got SYN part of initial handshake
+                assert!(data.is_empty());
+                self.recv.nxt = seqn.wrapping_add(1);
+            }
             return Ok(self.availability());
         }
 
@@ -272,6 +276,14 @@ impl Connection {
 
             // TODO: prune self.unacked
             // TODO: if unacked empty and waiting flush, notify
+
+            // FIXME: we don't support Write yet, so immediatedly send EOF
+            if let State::Estab = self.state {
+                // TODO: needs to be stored in the retransmission queue!
+                self.tcp.fin = true;
+                // self.write(nic, &[])?;
+                self.state = State::FinWait1;
+            }
             // TODO: update window
         }
 
@@ -283,26 +295,21 @@ impl Connection {
         }
 
         if let State::Estab | State::FinWait1 | State::FinWait2 = self.state {
-            // TODO: accept data
-            self.incoming
-                .extend(&data[(self.recv.nxt - seqn) as usize..]);
+            let mut unread_data_at = (self.recv.nxt - seqn) as usize;
+            if unread_data_at > data.len() {
+                // we must have received a re-transmitted FIN that we have already senn
+                // nxt points to beyond the fin, but the fin is not in data!
+                assert_eq!(unread_data_at, data.len() + 1);
+                unread_data_at = 0;
+            }
+            self.incoming.extend(&data[unread_data_at..]);
 
-            self.recv.nxt =
-                seqn.wrapping_add(data.len() as u32)
-                    .wrapping_add(if tcph.fin() { 1 } else { 0 });
+            self.recv.nxt = seqn
+                .wrapping_add(data.len() as u32)
+                .wrapping_add(if tcph.fin() { 1 } else { 0 });
 
             // Send an acknowledgement of the form: <SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>
             self.write(nic, &[])?;
-
-            /*
-            if let State::Estab = self.state {
-                // now let's terminate the connection
-                // TODO: needs to be stored in the retransmission queue!
-                self.tcp.fin = true;
-                self.write(nic, &[])?;
-                self.state = State::FinWait1;
-            }
-            */
         }
 
         if tcph.fin() {

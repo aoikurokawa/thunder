@@ -105,7 +105,17 @@ impl Write for TcpStream {
 }
 
 impl TcpStream {
-    pub fn shutdown(&self, _how: Shutdown) -> io::Result<()> {
-        unimplemented!()
+    pub fn shutdown(&mut self, _how: Shutdown) -> io::Result<()> {
+        let mut cm = self.h.manager.lock().unwrap();
+        let c = cm.connections.get_mut(&mut self.quad).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "stream was terminated unexpextedly",
+            )
+        })?;
+
+        c.closed = true;
+
+        Ok(())
     }
 }

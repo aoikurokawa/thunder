@@ -2,6 +2,7 @@ use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     io,
     net::Ipv4Addr,
+    os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd},
     sync::{mpsc, Arc, Condvar, Mutex},
     thread,
 };
@@ -11,6 +12,20 @@ mod tcp_listener;
 mod tcp_stream;
 
 const SENDQUEUE_SIZE: usize = 1024;
+
+struct RawFdWrapper(RawFd);
+
+impl AsRawFd for RawFdWrapper {
+    fn as_raw_fd(&self) -> std::os::unix::prelude::RawFd {
+        self.0
+    }
+}
+
+impl AsFd for RawFdWrapper {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        unsafe { BorrowedFd::borrow_raw(self.as_raw_fd()) }
+    }
+}
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Quad {
@@ -127,6 +142,24 @@ fn packet_loop(nic: &mut tun_tap::Iface, ih: InterfaceHandle) -> io::Result<()> 
     let mut buf = [0u8; 1504];
 
     loop {
+        // we want to read from nic, but we want to make sure that we'll wake up when the next
+        // timer has to be triggered!
+        let raw_fd = RawFdWrapper(nic.as_raw_fd());
+        let mut pfd = [nix::poll::PollFd::new(
+            &raw_fd,
+            nix::poll::PollFlags::POLLIN,
+        )];
+        let n = nix::poll::poll(&mut pfd[..], 1)?;
+        if n == 0 {
+            let mut cmg = ih.manager.lock().unwrap();
+            let cm = &mut *cmg;
+            for connection in cm.connections.values_mut() {
+                connection.on_tick(nic)?;
+            }
+
+            continue;
+        }
+        assert_eq!(n, 1);
         let nbytes = nic.recv(&mut buf[..])?;
 
         // let _eth_flags = u16::from_be_bytes([buf[0], buf[1]]);

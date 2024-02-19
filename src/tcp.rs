@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     io::{self, Write},
+    time,
 };
 
 use bitflags::bitflags;
@@ -37,8 +38,10 @@ pub struct Connection {
     pub ip: etherparse::Ipv4Header,
     pub tcp: etherparse::TcpHeader,
 
-    pub incoming: VecDeque<u8>,
-    pub unacked: VecDeque<u8>,
+    last_send: time::Instant,
+    pub(crate) incoming: VecDeque<u8>,
+    pub(crate) unacked: VecDeque<u8>,
+    pub(crate) closed: bool,
 }
 
 /// State of Send Sequence Space (RFC 793 S3.2 F4)
@@ -139,6 +142,8 @@ impl Connection {
 
             incoming: Default::default(),
             unacked: Default::default(),
+            closed: false,
+            last_send: time::Instant::now(),
         };
 
         // need to establish a connection
@@ -187,15 +192,15 @@ impl Connection {
         Ok(payload_bytes)
     }
 
-    pub fn send_rst(&mut self, nic: &mut tun_tap::Iface) -> io::Result<()> {
-        self.tcp.rst = true;
-        self.tcp.sequence_number = 0;
-        self.tcp.acknowledgment_number = 0;
+    // pub fn send_rst(&mut self, nic: &mut tun_tap::Iface) -> io::Result<()> {
+    //     self.tcp.rst = true;
+    //     self.tcp.sequence_number = 0;
+    //     self.tcp.acknowledgment_number = 0;
 
-        self.write(nic, &[])?;
+    //     self.write(nic, &[])?;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     pub fn on_packet<'a>(
         &mut self,
@@ -341,6 +346,11 @@ impl Connection {
         }
 
         a
+    }
+
+    pub(crate) fn on_tick(&mut self, nic: &mut tun_tap::Iface) -> io::Result<()> {
+        // decide if it needs to send something send it
+        Ok(())
     }
 }
 

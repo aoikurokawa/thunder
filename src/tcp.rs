@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     io::{self, Write},
     ops::Mul,
     time,
@@ -47,8 +47,7 @@ pub struct Connection {
 }
 
 struct Timers {
-    last_send: time::Instant,
-    send_times: VecDeque<(u32, time::Instant)>,
+    send_times: BTreeMap<u32, time::Instant>,
     srtt: time::Duration,
 }
 
@@ -151,8 +150,7 @@ impl Connection {
             incoming: Default::default(),
             unacked: Default::default(),
             timers: Timers {
-                last_send: time::Instant::now(),
-                send_times: VecDeque::default(),
+                send_times: BTreeMap::default(),
                 srtt: time::Duration::from_secs(1 * 60),
             },
             closed: false,
@@ -227,6 +225,8 @@ impl Connection {
             self.send.nxt = next_seq;
         }
         nic.send(&buf[..buf.len() - unwritten])?;
+
+        self.timers.send_times.insert(seq, time::Instant::now());
 
         Ok(payload_bytes)
     }
@@ -392,8 +392,21 @@ impl Connection {
         let nunacked = self.send.nxt.wrapping_sub(self.send.una) as usize;
         let unsent = self.unacked.len() - nunacked;
 
-        let waited_for = self.timers.last_send.elapsed();
-        if waited_for > time::Duration::from_secs(1) && waited_for > self.timers.srtt.mul(1.5) {
+        let waited_for = self
+            .timers
+            .send_times
+            .range(self.send.una..)
+            .next()
+            .map(|x| time::Instant::elapsed(x.1));
+
+        let should_retransmit = if let Some(waited_for) = waited_for {
+            waited_for > time::Duration::from_secs(1)
+                && waited_for.as_secs_f32() > 1.5 * self.timers.srtt.as_secs_f32()
+        } else {
+            false
+        };
+
+        if should_retransmit {
             // we should retransmit things
             let resend = std::cmp::min(self.unacked.len() as u32, self.send.wnd as u32);
             if resend < self.send.wnd as u32 && self.closed {
@@ -402,7 +415,7 @@ impl Connection {
             }
             let (h, t) = self.unacked.as_slices();
             self.write(nic, self.send.una, h, t, resend as usize)?;
-            // self.send.nxt = self.send.una.wrapping_add(resend);
+            self.send.nxt = self.send.una.wrapping_add(resend);
         } else {
             // we should send new data if we have new data and space in the window
             if unsent == 0 && self.closed_at.is_some() {

@@ -114,7 +114,7 @@ impl TcpStream {
             )
         })?;
 
-        c.closed = true;
+        c.close()?;
 
         Ok(())
     }

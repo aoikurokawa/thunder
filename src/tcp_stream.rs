@@ -16,9 +16,6 @@ impl Drop for TcpStream {
 
         // TODO: send FIN on cm.connections[quad]
         // TODO: _eventually_ remove self.quad from cm.connections
-        // if let Some(_c) = cm.connections.remove(&self.quad) {
-        //     unimplemented!();
-        // }
     }
 }
 
@@ -80,6 +77,7 @@ impl Write for TcpStream {
 
         let nwrite = std::cmp::min(buf.len(), SENDQUEUE_SIZE - c.unacked.len());
         c.unacked.extend(&buf[..nwrite]);
+
         Ok(nwrite)
     }
 
@@ -114,8 +112,6 @@ impl TcpStream {
             )
         })?;
 
-        c.close()?;
-
-        Ok(())
+        c.close()
     }
 }

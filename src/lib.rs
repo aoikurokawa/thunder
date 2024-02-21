@@ -7,6 +7,9 @@ use std::{
     thread,
 };
 
+use connection::Connection;
+
+mod connection;
 mod tcp;
 mod tcp_listener;
 mod tcp_stream;
@@ -51,7 +54,7 @@ pub struct Pending {
 #[derive(Default)]
 pub struct ConnectionManager {
     terminate: bool,
-    connections: HashMap<Quad, tcp::Connection>,
+    connections: HashMap<Quad, Connection>,
     pending: HashMap<u16, VecDeque<Quad>>,
 }
 
@@ -120,14 +123,14 @@ impl Interface {
     pub fn bind(&mut self, port: u16) -> io::Result<tcp_listener::TcpListener> {
         let mut cm = self.ih.as_mut().unwrap().manager.lock().unwrap();
         match cm.pending.entry(port) {
+            Entry::Vacant(v) => {
+                v.insert(VecDeque::new());
+            }
             Entry::Occupied(_) => {
                 return Err(io::Error::new(
                     io::ErrorKind::AddrInUse,
                     "port already bound",
                 ));
-            }
-            Entry::Vacant(v) => {
-                v.insert(VecDeque::new());
             }
         }
         drop(cm);
@@ -189,6 +192,7 @@ fn packet_loop(nic: &mut tun_tap::Iface, ih: InterfaceHandle) -> io::Result<()> 
                             src: (src, tcph.source_port()),
                             dst: (dst, tcph.destination_port()),
                         };
+
                         match cm.connections.entry(quad) {
                             Entry::Occupied(mut c) => {
                                 let a =
@@ -207,12 +211,11 @@ fn packet_loop(nic: &mut tun_tap::Iface, ih: InterfaceHandle) -> io::Result<()> 
                             Entry::Vacant(e) => {
                                 if let Some(pending) = cm.pending.get_mut(&tcph.destination_port())
                                 {
-                                    if let Some(c) = tcp::Connection::accept(nic, iph, tcph)? {
+                                    if let Some(c) = Connection::accept(nic, iph, tcph)? {
                                         e.insert(c);
                                         pending.push_back(quad);
                                         drop(cmg);
                                         ih.pending_var.notify_all();
-                                        // TODO: wake up pending accept()
                                     };
                                 }
                             }

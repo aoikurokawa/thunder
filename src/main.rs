@@ -5,12 +5,12 @@ use std::{
 
 fn main() -> io::Result<()> {
     let mut i = thunder::Interface::new()?;
-    let mut l1 = i.bind(8000)?;
+    let mut listener = i.bind(9000)?;
 
-    let jh1 = thread::spawn(move || {
-        while let Ok(mut stream) = l1.accept() {
+    while let Ok(mut stream) = listener.accept() {
+        thread::spawn(move || {
             eprintln!("got connection!");
-            stream.write(b"hello").unwrap();
+            stream.write(b"hello from thunder").unwrap();
             stream.shutdown(std::net::Shutdown::Write).unwrap();
             loop {
                 let mut buf = [0u8; 512];
@@ -23,10 +23,8 @@ fn main() -> io::Result<()> {
                     println!("{}", std::str::from_utf8(&buf[..n]).unwrap());
                 }
             }
-        }
-    });
-
-    jh1.join().unwrap();
+        });
+    }
 
     Ok(())
 }

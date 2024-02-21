@@ -1,5 +1,5 @@
 use std::{
-    io::{self, Read},
+    io::{self, Read, Write},
     thread,
 };
 
@@ -10,6 +10,7 @@ fn main() -> io::Result<()> {
     let jh1 = thread::spawn(move || {
         while let Ok(mut stream) = l1.accept() {
             eprintln!("got connection!");
+            stream.write(b"hello").unwrap();
             stream.shutdown(std::net::Shutdown::Write).unwrap();
             loop {
                 let mut buf = [0u8; 512];

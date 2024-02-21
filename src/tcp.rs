@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     io::{self, Write},
-    ops::Mul,
     time,
 };
 
@@ -46,9 +45,9 @@ pub struct Connection {
     pub(crate) closed_at: Option<u32>,
 }
 
-struct Timers {
+pub struct Timers {
     send_times: BTreeMap<u32, time::Instant>,
-    srtt: time::Duration,
+    srtt: f64,
 }
 
 /// State of Send Sequence Space (RFC 793 S3.2 F4)
@@ -151,7 +150,7 @@ impl Connection {
             unacked: Default::default(),
             timers: Timers {
                 send_times: BTreeMap::default(),
-                srtt: time::Duration::from_secs(1 * 60),
+                srtt: time::Duration::from_secs(1 * 60).as_secs_f64(),
             },
             closed: false,
             closed_at: None,
@@ -161,25 +160,36 @@ impl Connection {
         c.tcp.syn = true;
         c.tcp.ack = true;
 
-        c.write(nic, c.send.nxt, &[], &[], 0)?;
+        c.write(nic, c.send.nxt, 0)?;
 
         Ok(Some(c))
     }
 
-    fn write(
-        &mut self,
-        nic: &mut tun_tap::Iface,
-        seq: u32,
-        payload1: &[u8],
-        payload2: &[u8],
-        limit: usize,
-    ) -> io::Result<usize> {
+    fn write(&mut self, nic: &mut tun_tap::Iface, seq: u32, mut limit: usize) -> io::Result<usize> {
         let mut buf = [0u8; 1500];
         // self.tcp.sequence_number = self.send.nxt;
         self.tcp.sequence_number = seq;
         self.tcp.acknowledgment_number = self.recv.nxt;
 
-        let max_data = std::cmp::min(limit, payload1.len() + payload2.len());
+        let mut offset = seq.wrapping_sub(self.send.una) as usize;
+        // we want self.unacked[nunacked..]
+        if let Some(closed_at) = self.closed_at {
+            if seq == closed_at.wrapping_add(1) {
+                offset = 0;
+                limit = 0;
+            }
+        }
+
+        let (mut h, mut t) = self.unacked.as_slices();
+        if h.len() >= offset {
+            h = &h[offset..];
+        } else {
+            let skipped = h.len();
+            h = &[];
+            t = &t[(offset - skipped)..];
+        }
+
+        let max_data = std::cmp::min(limit, h.len() + t.len());
         let size = std::cmp::min(
             buf.len(),
             self.tcp.header_len() + self.ip.header_len() + max_data,
@@ -200,12 +210,12 @@ impl Connection {
             let mut written = 0;
             let mut limit = max_data;
 
-            let mut p1l = std::cmp::min(limit, payload1.len());
-            written += unwritten.write(&payload1[..p1l])?;
+            let p1l = std::cmp::min(limit, h.len());
+            written += unwritten.write(&h[..p1l])?;
             limit -= written;
 
-            let p2l = std::cmp::min(limit, payload2.len());
-            written += unwritten.write(&payload2[..p2l])?;
+            let p2l = std::cmp::min(limit, t.len());
+            written += unwritten.write(&t[..p2l])?;
 
             written
         };
@@ -236,7 +246,7 @@ impl Connection {
     //     self.tcp.sequence_number = 0;
     //     self.tcp.acknowledgment_number = 0;
 
-    //     self.write(nic, self.send.nxt, &[], &[], 0)?;
+    //     self.write(nic, self.send.nxt, 0)?;
 
     //     Ok(())
     // }
@@ -287,7 +297,7 @@ impl Connection {
         };
 
         if !okay {
-            self.write(nic, self.send.nxt, &[], &[], 0)?;
+            self.write(nic, self.send.nxt, 0)?;
             return Ok(self.availability());
         }
 
@@ -315,19 +325,26 @@ impl Connection {
 
         if let State::Estab | State::FinWait1 | State::FinWait2 = self.state {
             if is_between_wrapped(self.send.una, ackn, self.send.nxt.wrapping_add(1)) {
-                self.send.una = ackn;
+                if !self.unacked.is_empty() {
+                    let _nacked = self
+                        .unacked
+                        .drain(..ackn.wrapping_sub(self.send.una) as usize)
+                        .count();
+                    self.timers.send_times.retain(|&seq, sent| {
+                        if is_between_wrapped(self.send.una, seq, ackn) {
+                            self.timers.srtt =
+                                0.8 * self.timers.srtt + (1.0 - 0.8) * sent.elapsed().as_secs_f64();
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                    self.send.una = ackn;
+                }
             }
 
             // TODO: prune self.unacked
             // TODO: if unacked empty and waiting flush, notify
-
-            // FIXME: we don't support Write yet, so immediatedly send EOF
-            if let State::Estab = self.state {
-                // TODO: needs to be stored in the retransmission queue!
-                self.tcp.fin = true;
-                // self.write(nic, &[])?;
-                self.state = State::FinWait1;
-            }
             // TODO: update window
         }
 
@@ -354,14 +371,14 @@ impl Connection {
 
             // Send an acknowledgement of the form: <SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>
             // TODO: maybe just tick to piggyback ack on data?
-            self.write(nic, self.send.nxt, &[], &[], 0)?;
+            self.write(nic, self.send.nxt, 0)?;
         }
 
         if tcph.fin() {
             match self.state {
                 State::FinWait2 => {
                     // we're done with the connnection
-                    self.write(nic, self.send.nxt, &[], &[], 0)?;
+                    self.write(nic, self.send.nxt, 0)?;
                     self.state = State::TimeWait;
                 }
                 _ => unimplemented!(),
@@ -397,11 +414,11 @@ impl Connection {
             .send_times
             .range(self.send.una..)
             .next()
-            .map(|x| time::Instant::elapsed(x.1));
+            .map(|x| x.1.elapsed());
 
         let should_retransmit = if let Some(waited_for) = waited_for {
             waited_for > time::Duration::from_secs(1)
-                && waited_for.as_secs_f32() > 1.5 * self.timers.srtt.as_secs_f32()
+                && waited_for.as_secs_f64() > 1.5 * self.timers.srtt
         } else {
             false
         };
@@ -412,10 +429,9 @@ impl Connection {
             if resend < self.send.wnd as u32 && self.closed {
                 // can include the FIN?
                 self.tcp.fin = true;
+                self.closed_at = Some(self.send.una.wrapping_add(self.unacked.len() as u32));
             }
-            let (h, t) = self.unacked.as_slices();
-            self.write(nic, self.send.una, h, t, resend as usize)?;
-            self.send.nxt = self.send.una.wrapping_add(resend);
+            self.write(nic, self.send.una, resend as usize)?;
         } else {
             // we should send new data if we have new data and space in the window
             if unsent == 0 && self.closed_at.is_some() {
@@ -430,26 +446,16 @@ impl Connection {
             let send = std::cmp::min(unsent, allowed);
             if send < allowed && self.closed && self.closed_at.is_none() {
                 self.tcp.fin = true;
-                self.closed_at = Some(self.send.nxt.wrapping_add(unsent as u32));
+                self.closed_at = Some(self.send.una.wrapping_add(self.unacked.len() as u32));
             }
-            let (mut h, mut t) = self.unacked.as_slices();
-            // we want self.unacked[nunacked..]
-            if h.len() >= nunacked {
-                h = &h[nunacked as usize..];
-            } else {
-                let skipped = h.len();
-                h = &[];
-                t = &t[(nunacked - skipped)..];
-            }
-
-            self.write(nic, self.send.nxt, h, t, send)?;
+            self.write(nic, self.send.nxt, send)?;
         }
 
         // decide if it needs to send something send it
         Ok(())
     }
 
-    pub(crate) fn close(&self) -> io::Result<()> {
+    pub(crate) fn close(&mut self) -> io::Result<()> {
         self.closed = true;
 
         match self.state {
